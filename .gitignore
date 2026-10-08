@@ -1,0 +1,53 @@
+# ===== 敏感信息（公开仓库重点防护）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+config/local/
+config/application-local.*
+*token*.txt
+*credentials*.json
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# ===== Java / Maven / Gradle =====
+target/
+build/
+*.class
+*.jar
+*.war
+.gradle/
+
+# ===== Node / Vue / Vite =====
+node_modules/
+dist/
+*.local
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ===== 日志与临时文件 =====
+logs/
+*.log
+tmp/
+temp/
