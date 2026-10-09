@@ -129,6 +129,21 @@ export class VolcApiClient {
     }>('GetPersonalPlan', { Plan: plan })
   }
 
+  /**
+   * 查询个人版 Coding Plan 用量 (未公开文档 API, 社区已验证)
+   * 返回 5h/周/月 已用百分比和重置时间
+   */
+  getCodingPlanUsage() {
+    return this.request<{
+      Status?: string
+      QuotaUsage?: Array<{
+        Level: string          // "session"/"5-hour"/"five_hour"/"5h" | "weekly"/"week" | "monthly"/"month"
+        Percent: number        // 已用百分比 0-100
+        ResetTimestamp: number // epoch 秒; <=0 表示无重置
+      }>
+    }>('GetCodingPlanUsage', {})
+  }
+
   /** 查询席位列表 (企业版) */
   listSeatInfos(scene: 'coding_plan_enterprise' | 'agent_plan_enterprise' = 'coding_plan_enterprise') {
     return this.request<{

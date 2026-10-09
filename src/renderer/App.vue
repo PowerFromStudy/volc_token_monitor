@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useMainStore } from './stores/main'
 import BallApp from './views/BallApp.vue'
 import PanelApp from './views/PanelApp.vue'
+import type { UsageSnapshot } from '../shared/types'
 
 const store = useMainStore()
 
@@ -16,6 +17,7 @@ onMounted(async () => {
   }
   window.volc.onStatusUpdate((s: string) => store.setStatus(s as any))
   window.volc.onActiveChanged((id: string) => { store.activeSeatId = id })
+  window.volc.onUsageUpdate((snaps: UsageSnapshot[]) => { store.snapshots = snaps })
 })
 </script>
 

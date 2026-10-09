@@ -165,7 +165,13 @@ app.whenReady().then(() => {
   createBallWindow()
   createPanelWindow()
   createTray()
-  registerIpcHandlers(store, monitor, alertEngine, () => panelWindow)
+  registerIpcHandlers(
+    store,
+    monitor,
+    alertEngine,
+    () => panelWindow,
+    () => [ballWindow, panelWindow].filter((w): w is BrowserWindow => !!w)
+  )
 
   monitor.start()
 

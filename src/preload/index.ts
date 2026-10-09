@@ -17,9 +17,12 @@ const api = {
   // 用量
   listUsage: () => ipcRenderer.invoke('usage:list'),
   refreshUsage: () => ipcRenderer.invoke('usage:refresh'),
-  // 环境变量
+  // 切换 Key (写入 ~/.claude/settings.json)
   switchEnv: (seatId: string) => ipcRenderer.invoke('env:switch', seatId),
-  getEnv: (key: string) => ipcRenderer.invoke('env:get', key),
+  // 模型
+  listModels: () => ipcRenderer.invoke('model:list'),
+  switchModel: (model: string) => ipcRenderer.invoke('model:switch', model),
+  getCurrentModel: () => ipcRenderer.invoke('model:current'),
   // 设置
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (settings: any) => ipcRenderer.invoke('settings:set', settings),
@@ -34,6 +37,10 @@ const api = {
   onStatusUpdate: (cb: (status: string) => void) => {
     ipcRenderer.removeAllListeners('status:update')
     ipcRenderer.on('status:update', (_e, s) => cb(s))
+  },
+  onUsageUpdate: (cb: (snapshots: any[]) => void) => {
+    ipcRenderer.removeAllListeners('usage:update')
+    ipcRenderer.on('usage:update', (_e, snaps) => cb(snaps))
   },
   onActiveChanged: (cb: (seatId: string) => void) => {
     ipcRenderer.removeAllListeners('active:changed')

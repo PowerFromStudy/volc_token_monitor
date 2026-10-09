@@ -57,6 +57,8 @@ export const useMainStore = defineStore('main', () => {
   async function switchSeat(seatId: string) {
     await window.volc.switchEnv(seatId)
     activeSeatId.value = seatId
+    // 切换后立即刷新用量，让悬浮球更新
+    await refreshUsage()
   }
 
   async function syncSeats(accountId: string) {

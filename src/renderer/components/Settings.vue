@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useMainStore } from '../stores/main'
 
 const store = useMainStore()
@@ -14,6 +14,35 @@ const form = reactive({
 })
 
 const saving = ref(false)
+
+// ---------- 模型 ----------
+const models = ref<string[]>([])
+const modelsLoading = ref(false)
+
+async function loadModels() {
+  modelsLoading.value = true
+  try {
+    models.value = await window.volc.listModels()
+  } catch (e: any) {
+    alert('模型列表获取失败: ' + (e.message || e))
+  } finally {
+    modelsLoading.value = false
+  }
+}
+
+async function onModelChange() {
+  if (!store.settings.model) return
+  await window.volc.switchModel(store.settings.model)
+  alert(`已切换模型: ${store.settings.model}（新开 Claude Code 会话生效）`)
+}
+
+onMounted(async () => {
+  // 没选过模型时，默认选中 settings.json 当前生效的模型
+  if (!store.settings.model) {
+    store.settings.model = await window.volc.getCurrentModel()
+  }
+  await loadModels()
+})
 
 async function addAccount() {
   if (!form.name || !form.accessKey || !form.secretKey) return
@@ -114,6 +143,24 @@ async function saveSettings() {
       </div>
       <button class="save-btn" @click="saveSettings">保存设置</button>
     </section>
+
+    <!-- 模型设置 -->
+    <section class="block">
+      <h3>模型设置</h3>
+      <div class="setting-row">
+        <label>模型</label>
+        <div class="model-controls">
+          <select v-model="store.settings.model" @change="onModelChange">
+            <option value="" disabled>选择模型</option>
+            <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+          </select>
+          <button class="sync-btn" @click="loadModels" :disabled="modelsLoading">
+            {{ modelsLoading ? '加载中...' : '刷新' }}
+          </button>
+        </div>
+      </div>
+      <p class="model-hint">切换后写入 ~/.claude/settings.json，新开 Claude Code 会话生效</p>
+    </section>
   </div>
 </template>
 
@@ -141,4 +188,7 @@ h3 { font-size: 14px; color: var(--text-primary); }
 .setting-row label { font-size: 13px; color: var(--text-primary); }
 .setting-row input[type="number"] { width: 80px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; text-align: right; }
 .setting-row input[type="checkbox"] { width: 18px; height: 18px; }
+.model-controls { display: flex; gap: 6px; align-items: center; }
+.model-controls select { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; max-width: 150px; }
+.model-hint { font-size: 10px; color: var(--text-secondary); margin: 0; }
 </style>

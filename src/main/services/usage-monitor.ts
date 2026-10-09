@@ -13,6 +13,7 @@ export class UsageMonitor {
   private timer: NodeJS.Timeout | null = null
   private snapshots: Map<string, UsageSnapshot> = new Map()
   private lastError: Map<string, string> = new Map()
+  private onRefresh?: (snaps: UsageSnapshot[]) => void
 
   constructor(keyManager: KeyManager, seats: Seat[], settings: AppSettings) {
     this.keyManager = keyManager
@@ -29,6 +30,11 @@ export class UsageMonitor {
     this.seats = seats
   }
 
+  /** 注册每次刷新完成后的回调 (告警评估 / 快照推送) */
+  setOnRefresh(cb: (snaps: UsageSnapshot[]) => void) {
+    this.onRefresh = cb
+  }
+
   getSnapshots(): UsageSnapshot[] {
     return Array.from(this.snapshots.values())
   }
@@ -39,14 +45,21 @@ export class UsageMonitor {
 
   start() {
     this.stop()
-    this.refreshAll().catch(() => {})
+    this.tick().catch(() => {})
     this.timer = setInterval(() => {
-      this.refreshAll().catch(() => {})
+      this.tick().catch(() => {})
     }, this.settings.pollInterval)
   }
 
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null }
+  }
+
+  /** 刷新一次并触发 onRefresh 回调 (定时轮询与手动刷新共用同一条链路) */
+  async tick(): Promise<UsageSnapshot[]> {
+    const snaps = await this.refreshAll()
+    this.onRefresh?.(snaps)
+    return snaps
   }
 
   /** 刷新所有用量 */
@@ -109,34 +122,32 @@ export class UsageMonitor {
               accountId: account.id,
               timestamp: Date.now()
             }
-            if (codingPlan) {
-              if (codingPlan.Status === 'Running') {
-                snap.info = `${codingPlan.PlanType} 套餐生效中`
-                // 尝试获取 token 用量明细
-                try {
-                  const now = Date.now()
-                  const fiveHourStart = new Date(now - 5 * 3600000).toISOString()
-                  const weekStart = new Date(now - 7 * 86400000).toISOString()
-                  const monthStart = new Date(now - 30 * 86400000).toISOString()
-                  const nowIso = new Date(now).toISOString()
-
-                  const [fiveHrDetail, weekDetail, monthDetail] = await Promise.all([
-                    client.getUsageDetails(fiveHourStart, nowIso, 'Hour'),
-                    client.getUsageDetails(weekStart, nowIso, 'Day'),
-                    client.getUsageDetails(monthStart, nowIso, 'Day')
-                  ])
-                  snap.codingTokensUsed = {
-                    fiveHour: (fiveHrDetail.Details || []).reduce((s, d) => s + d.Usage, 0),
-                    weekly: (weekDetail.Details || []).reduce((s, d) => s + d.Usage, 0),
-                    monthly: (monthDetail.Details || []).reduce((s, d) => s + d.Usage, 0)
+            if (codingPlan && codingPlan.Status === 'Running') {
+              snap.info = `${codingPlan.PlanType} 套餐生效中`
+              // 个人版 Coding Plan 用量 (未公开文档 API)
+              try {
+                const usage = await client.getCodingPlanUsage()
+                for (const q of usage.QuotaUsage ?? []) {
+                  const lv = (q.Level || '').toLowerCase()
+                  const resetMs = q.ResetTimestamp > 0 ? q.ResetTimestamp * 1000 : undefined
+                  if (['session', '5-hour', 'five_hour', '5h'].includes(lv)) {
+                    snap.shortTermUsage = q.Percent
+                    snap.shortTermResetTime = resetMs
+                  } else if (['weekly', 'week'].includes(lv)) {
+                    snap.weeklyUsage = q.Percent
+                    snap.weeklyResetTime = resetMs
+                  } else if (['monthly', 'month'].includes(lv)) {
+                    snap.monthlyUsage = q.Percent
+                    snap.monthlyResetTime = resetMs
                   }
-                  console.log('[monitor] coding tokens:', snap.codingTokensUsed)
-                } catch (e: any) {
-                  console.error('[monitor] getUsageDetails for coding failed:', e.message)
                 }
-              } else {
-                snap.info = `${codingPlan.PlanType} 套餐已过期`
+                console.log('[monitor] coding plan usage:', JSON.stringify(usage))
+              } catch (e: any) {
+                console.error('[monitor] GetCodingPlanUsage failed:', e.message)
+                snap.info = `${codingPlan.PlanType} 套餐生效中（用量查询暂不可用）`
               }
+            } else if (codingPlan) {
+              snap.info = `${codingPlan.PlanType} 套餐已过期`
             } else {
               snap.info = '未开通 Coding Plan'
             }

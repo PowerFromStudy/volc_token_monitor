@@ -45,13 +45,6 @@ const monthlyPct = computed(() => {
   return s.monthlyUsage
 })
 
-// 格式化 token 数
-function fmtTokens(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
-  return String(n)
-}
-
 const statusColor = computed(() => {
   const p = fiveHourPct.value
   if (p === undefined) return 'var(--color-idle)'
@@ -96,12 +89,6 @@ async function onSwitch() {
     </div>
 
     <div v-if="snapshot?.error" class="error">⚠ {{ snapshot.error }}</div>
-
-    <div v-else-if="snapshot && snapshot.codingTokensUsed" class="usage">
-      <div class="token-row"><span class="token-label">5小时</span><span class="token-val">{{ fmtTokens(snapshot.codingTokensUsed.fiveHour) }} tokens</span></div>
-      <div class="token-row"><span class="token-label">本周</span><span class="token-val">{{ fmtTokens(snapshot.codingTokensUsed.weekly) }} tokens</span></div>
-      <div class="token-row"><span class="token-label">本月</span><span class="token-val">{{ fmtTokens(snapshot.codingTokensUsed.monthly) }} tokens</span></div>
-    </div>
 
     <div v-else-if="snapshot && (fiveHourPct !== undefined || weeklyPct !== undefined || monthlyPct !== undefined)" class="usage">
       <UsageBar label="5小时" :percent="fiveHourPct" :reset="formatReset(snapshot.shortTermResetTime || snapshot.afpFiveHour?.resetTime)" />

@@ -62,19 +62,10 @@ export interface UsageSnapshot {
   // 错误/信息
   error?: string
   info?: string  // 非错误的信息提示 (如: 套餐生效中)
-  // Coding Plan token 明细 (个人版无百分比 API, 用 token 数代替)
-  codingTokensUsed?: { fiveHour: number; weekly: number; monthly: number }
 }
 
 /** 监控状态 */
 export type MonitorStatus = 'ok' | 'warning' | 'danger' | 'idle'
-
-/** 环境变量配置 */
-export interface EnvConfig {
-  arkApiKey: string
-  arkBaseUrl: string
-  arkModel: string
-}
 
 /** 应用设置 */
 export interface AppSettings {
@@ -85,6 +76,7 @@ export interface AppSettings {
   autoSwitchThreshold: number // 自动切换阈值 %，默认 90
   expireWarnDays: number     // 到期提醒天数，默认 3
   theme: string              // 皮肤主题
+  model: string              // 激活模型名，空则保留 settings.json 现有模型
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -94,5 +86,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSwitch: true,
   autoSwitchThreshold: 90,
   expireWarnDays: 3,
-  theme: 'default'
+  theme: 'default',
+  model: ''
 }
