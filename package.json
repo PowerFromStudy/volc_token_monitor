@@ -1,0 +1,31 @@
+{
+  "name": "volc-token-monitor",
+  "version": "0.1.0",
+  "description": "火山引擎 Token 监控与 Key 管理桌面应用",
+  "main": "out/main/index.js",
+  "author": "volc-token-monitor",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "electron-store": "^8.2.0",
+    "node-machine-id": "^1.1.12",
+    "pinia": "^2.2.4"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@vitejs/plugin-vue": "^5.1.4",
+    "electron": "^33.0.2",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vue": "^3.5.12",
+    "vue-tsc": "^2.1.10"
+  }
+}
