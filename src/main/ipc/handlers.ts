@@ -5,7 +5,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import type { AppStore } from '../store/app-store'
 import type { UsageMonitor } from '../services/usage-monitor'
 import type { AlertEngine } from '../services/alert-engine'
-import { EnvSwitcher } from '../services/env-switcher'
+import { ClaudeSettings } from '../services/claude-settings'
 import { VolcApiClient } from '../services/volc-api'
 import type { Seat, AppSettings } from '../../shared/types'
 
@@ -13,9 +13,17 @@ export function registerIpcHandlers(
   store: AppStore,
   monitor: UsageMonitor,
   alertEngine: AlertEngine,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  getAllWindows: () => BrowserWindow[]
 ) {
-  const envSwitcher = new EnvSwitcher()
+  const claudeSettings = new ClaudeSettings()
+
+  /** 广播事件到悬浮球/面板两个窗口 */
+  function broadcast(channel: string, payload: any) {
+    for (const win of getAllWindows()) {
+      win.webContents.send(channel, payload)
+    }
+  }
 
   // ---------- 账号管理 ----------
   ipcMain.handle('account:list', () => {
@@ -148,43 +156,58 @@ export function registerIpcHandlers(
   // ---------- 用量 ----------
   ipcMain.handle('usage:list', () => monitor.getSnapshots())
 
+  // 手动刷新与定时轮询共用 monitor.tick 链路，后处理在 onRefresh 回调里
   ipcMain.handle('usage:refresh', async () => {
-    try {
-      const snaps = await monitor.refreshAll()
-      console.log('[ipc] refreshAll returned', snaps.length, 'snapshots')
-      for (const s of snaps) {
-        if (s.error) console.log('[ipc] seat', s.seatId, 'error:', s.error)
-      }
-
-      let status = 'idle' as any
-      try {
-        const decision = alertEngine.evaluate(snaps, store.getSeats())
-        status = decision.status
-        if (decision.needAutoSwitch && decision.switchFromSeatId) {
-          const next = alertEngine.pickNextSeat(snaps, store.getSeats(), decision.switchFromSeatId)
-          if (next) await switchToSeat(next)
-        }
-      } catch (e: any) {
-        console.error('[ipc] alertEngine error:', e.message)
-      }
-
-      getMainWindow()?.webContents.send('status:update', status)
-      return snaps
-    } catch (e: any) {
-      console.error('[ipc] usage:refresh failed:', e)
-      throw e
-    }
+    return await monitor.tick()
   })
 
-  // ---------- 环境变量 / 切换 ----------
+  // 轮询/手动刷新共用的后处理链路: 告警评估 -> 自动切换 -> 推送快照到两个窗口
+  monitor.setOnRefresh(snaps => {
+    try {
+      const decision = alertEngine.evaluate(snaps, store.getSeats())
+      broadcast('status:update', decision.status)
+      if (decision.needAutoSwitch && decision.switchFromSeatId) {
+        const next = alertEngine.pickNextSeat(snaps, store.getSeats(), decision.switchFromSeatId)
+        if (next) switchToSeat(next)
+      }
+    } catch (e: any) {
+      console.error('[monitor] alertEngine error:', e.message)
+    }
+    broadcast('usage:update', snaps)
+  })
+
+  // ---------- 切换 Key ----------
   ipcMain.handle('env:switch', async (_e, seatId: string) => {
     const seat = store.getSeats().find(s => s.seatId === seatId)
     if (!seat) throw new Error('席位不存在')
     await switchToSeat(seat)
+    // 切换后立即刷新用量; status:update / usage:update 由 onRefresh 回调统一广播
+    await monitor.tick()
     return true
   })
 
-  ipcMain.handle('env:get', (_e, key: string) => envSwitcher.getEnv(key))
+  // ---------- 模型 ----------
+  /** 可用模型列表 (来自火山 ListModelRateLimit，返回账号可用的基础模型名) */
+  ipcMain.handle('model:list', async () => {
+    const accounts = store.listAccounts()
+    if (accounts.length === 0) throw new Error('请先添加火山账号')
+    // 优先用激活席位所属账号，否则第一个
+    const activeSeat = store.getSeats().find(s => s.seatId === store.getActiveSeatId())
+    const account = accounts.find(a => a.id === activeSeat?.accountId) ?? accounts[0]
+    const client = new VolcApiClient({ accessKey: account.accessKey, secretKey: account.secretKey })
+    const resp = await client.listModelRateLimit()
+    return resp.Items.map(i => i.FoundationModelName)
+  })
+
+  /** 切换模型: 保存到应用设置并写入 ~/.claude/settings.json */
+  ipcMain.handle('model:switch', (_e, model: string) => {
+    store.setSettings({ model })
+    claudeSettings.setModel(model)
+    return true
+  })
+
+  /** 当前 settings.json 实际生效的模型名 */
+  ipcMain.handle('model:current', () => claudeSettings.getCurrentModel() ?? '')
 
   // ---------- 设置 ----------
   ipcMain.handle('settings:get', () => store.getSettings())
@@ -208,17 +231,15 @@ export function registerIpcHandlers(
     else { win.show(); win.focus() }
   })
 
-  async function switchToSeat(seat: Seat) {
-    const baseUrl = seat.scene === 'agent_plan'
-      ? 'https://ark.cn-beijing.volces.com/api/v3'
-      : 'https://ark.cn-beijing.volces.com/api/v3'
-    await envSwitcher.setEnvs({
-      ARK_API_KEY: seat.apiKey,
-      ARK_BASE_URL: baseUrl,
-      ARK_MODEL: 'ark-code-latest'
-    })
+  /**
+   * 切换激活 Key: 按 scene 选火山接入地址，写 ~/.claude/settings.json 的 env 块
+   * 模型优先用应用设置里选的，没选过则保留 settings.json 现有模型
+   */
+  function switchToSeat(seat: Seat) {
+    const model = store.getSettings().model || claudeSettings.getCurrentModel()
+    claudeSettings.switchKey(seat.scene, seat.apiKey, model)
     store.setActiveSeatId(seat.seatId)
-    getMainWindow()?.webContents.send('active:changed', seat.seatId)
+    broadcast('active:changed', seat.seatId)
   }
 }
 

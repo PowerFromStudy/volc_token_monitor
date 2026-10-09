@@ -5,8 +5,9 @@ const Store = require("electron-store");
 const crypto = require("node:crypto");
 const nodeMachineId = require("node-machine-id");
 const axios = require("axios");
-const node_child_process = require("node:child_process");
-const node_util = require("node:util");
+const node_fs = require("node:fs");
+const node_os = require("node:os");
+const node_path = require("node:path");
 const DEFAULT_SETTINGS = {
   pollInterval: 12e4,
   warnThreshold: 70,
@@ -14,7 +15,8 @@ const DEFAULT_SETTINGS = {
   autoSwitch: true,
   autoSwitchThreshold: 90,
   expireWarnDays: 3,
-  theme: "default"
+  theme: "default",
+  model: ""
 };
 const ALGO = "aes-256-gcm";
 function deriveKey() {
@@ -264,6 +266,13 @@ ${hashedCanonicalRequest}`;
   getPersonalPlan(plan) {
     return this.request("GetPersonalPlan", { Plan: plan });
   }
+  /**
+   * 查询个人版 Coding Plan 用量 (未公开文档 API, 社区已验证)
+   * 返回 5h/周/月 已用百分比和重置时间
+   */
+  getCodingPlanUsage() {
+    return this.request("GetCodingPlanUsage", {});
+  }
   /** 查询席位列表 (企业版) */
   listSeatInfos(scene = "coding_plan_enterprise") {
     return this.request("ListSeatInfos", {
@@ -328,6 +337,10 @@ class UsageMonitor {
   setSeats(seats) {
     this.seats = seats;
   }
+  /** 注册每次刷新完成后的回调 (告警评估 / 快照推送) */
+  setOnRefresh(cb) {
+    this.onRefresh = cb;
+  }
   getSnapshots() {
     return Array.from(this.snapshots.values());
   }
@@ -336,10 +349,10 @@ class UsageMonitor {
   }
   start() {
     this.stop();
-    this.refreshAll().catch(() => {
+    this.tick().catch(() => {
     });
     this.timer = setInterval(() => {
-      this.refreshAll().catch(() => {
+      this.tick().catch(() => {
       });
     }, this.settings.pollInterval);
   }
@@ -348,6 +361,12 @@ class UsageMonitor {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+  /** 刷新一次并触发 onRefresh 回调 (定时轮询与手动刷新共用同一条链路) */
+  async tick() {
+    const snaps = await this.refreshAll();
+    this.onRefresh?.(snaps);
+    return snaps;
   }
   /** 刷新所有用量 */
   async refreshAll() {
@@ -401,32 +420,31 @@ class UsageMonitor {
               accountId: account.id,
               timestamp: Date.now()
             };
-            if (codingPlan) {
-              if (codingPlan.Status === "Running") {
-                snap.info = `${codingPlan.PlanType} 套餐生效中`;
-                try {
-                  const now = Date.now();
-                  const fiveHourStart = new Date(now - 5 * 36e5).toISOString();
-                  const weekStart = new Date(now - 7 * 864e5).toISOString();
-                  const monthStart = new Date(now - 30 * 864e5).toISOString();
-                  const nowIso = new Date(now).toISOString();
-                  const [fiveHrDetail, weekDetail, monthDetail] = await Promise.all([
-                    client.getUsageDetails(fiveHourStart, nowIso, "Hour"),
-                    client.getUsageDetails(weekStart, nowIso, "Day"),
-                    client.getUsageDetails(monthStart, nowIso, "Day")
-                  ]);
-                  snap.codingTokensUsed = {
-                    fiveHour: (fiveHrDetail.Details || []).reduce((s, d) => s + d.Usage, 0),
-                    weekly: (weekDetail.Details || []).reduce((s, d) => s + d.Usage, 0),
-                    monthly: (monthDetail.Details || []).reduce((s, d) => s + d.Usage, 0)
-                  };
-                  console.log("[monitor] coding tokens:", snap.codingTokensUsed);
-                } catch (e) {
-                  console.error("[monitor] getUsageDetails for coding failed:", e.message);
+            if (codingPlan && codingPlan.Status === "Running") {
+              snap.info = `${codingPlan.PlanType} 套餐生效中`;
+              try {
+                const usage = await client.getCodingPlanUsage();
+                for (const q of usage.QuotaUsage ?? []) {
+                  const lv = (q.Level || "").toLowerCase();
+                  const resetMs = q.ResetTimestamp > 0 ? q.ResetTimestamp * 1e3 : void 0;
+                  if (["session", "5-hour", "five_hour", "5h"].includes(lv)) {
+                    snap.shortTermUsage = q.Percent;
+                    snap.shortTermResetTime = resetMs;
+                  } else if (["weekly", "week"].includes(lv)) {
+                    snap.weeklyUsage = q.Percent;
+                    snap.weeklyResetTime = resetMs;
+                  } else if (["monthly", "month"].includes(lv)) {
+                    snap.monthlyUsage = q.Percent;
+                    snap.monthlyResetTime = resetMs;
+                  }
                 }
-              } else {
-                snap.info = `${codingPlan.PlanType} 套餐已过期`;
+                console.log("[monitor] coding plan usage:", JSON.stringify(usage));
+              } catch (e) {
+                console.error("[monitor] GetCodingPlanUsage failed:", e.message);
+                snap.info = `${codingPlan.PlanType} 套餐生效中（用量查询暂不可用）`;
               }
+            } else if (codingPlan) {
+              snap.info = `${codingPlan.PlanType} 套餐已过期`;
             } else {
               snap.info = "未开通 Coding Plan";
             }
@@ -615,59 +633,71 @@ class AlertEngine {
     }
   }
 }
-const execAsync = node_util.promisify(node_child_process.exec);
-class EnvSwitcher {
-  /**
-   * 写入用户级环境变量
-   * 使用 reg add HKCU\Environment
-   */
-  async setEnv(key, value) {
-    const escaped = value.replace(/'/g, "''");
-    const cmd = `reg add "HKCU\\Environment" /v "${key}" /t REG_EXPAND_SZ /d "${escaped}" /f`;
-    await execAsync(cmd);
+const PLAN_BASE_URLS = {
+  coding_plan: "https://ark.cn-beijing.volces.com/api/coding",
+  agent_plan: "https://ark.cn-beijing.volces.com/api/plan"
+};
+const MODEL_TIERS = ["OPUS", "SONNET", "HAIKU", "FABLE"];
+class ClaudeSettings {
+  get filePath() {
+    return node_path.join(node_os.homedir(), ".claude", "settings.json");
   }
-  async setEnvs(vars) {
-    for (const [k, v] of Object.entries(vars)) {
-      if (v !== void 0 && v !== null) {
-        await this.setEnv(k, v);
-      }
+  /** 读取 settings.json；文件不存在返回空对象，格式异常直接抛错 (绝不覆盖坏文件) */
+  load() {
+    if (!node_fs.existsSync(this.filePath)) return {};
+    const settings = JSON.parse(node_fs.readFileSync(this.filePath, "utf-8"));
+    if (typeof settings !== "object" || settings === null) {
+      throw new Error("settings.json 格式异常，已中止写入");
     }
-    await this.broadcastChange();
+    return settings;
   }
-  async deleteEnv(key) {
-    await execAsync(`reg delete "HKCU\\Environment" /v "${key}" /f`);
-    await this.broadcastChange();
+  save(settings) {
+    node_fs.writeFileSync(this.filePath, JSON.stringify(settings, null, 2));
   }
   /**
-   * 广播 WM_SETTINGCHANGE 通知系统环境变量变更
-   * 通过 PowerShell 调用 SendMessageTimeout
+   * 切换激活 Key: 写 token、按套餐选接入地址，模型有值时同步模型变量
+   * @param scene 席位套餐类型，决定 ANTHROPIC_BASE_URL
+   * @param apiKey 新 Key
+   * @param model 可选模型名，空则保留 settings.json 现有模型
+   * @since 2026-10-08
    */
-  async broadcastChange() {
-    const ps = `
-      Add-Type -Namespace Win32 -Name Native -MemberDefinition '[DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);'
-      $HWND_BROADCAST = [IntPtr]0xffff
-      $WM_SETTINGCHANGE = 0x1a
-      $result = [UIntPtr]::Zero
-      [Win32.Native]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null
-    `;
-    try {
-      await execAsync(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"').replace(/\n/g, " ")}"`);
-    } catch {
-    }
+  switchKey(scene, apiKey, model) {
+    const settings = this.load();
+    const env = settings.env ??= {};
+    env.ANTHROPIC_AUTH_TOKEN = apiKey;
+    env.ANTHROPIC_BASE_URL = PLAN_BASE_URLS[scene];
+    if (model) this.applyModel(env, model);
+    this.save(settings);
   }
-  /** 读取当前用户环境变量 */
-  async getEnv(key) {
+  /** 只切换模型 (保留当前 token / 接入地址) */
+  setModel(model) {
+    const settings = this.load();
+    this.applyModel(settings.env ??= {}, model);
+    this.save(settings);
+  }
+  /** 当前 settings.json 生效的模型名 */
+  getCurrentModel() {
     try {
-      const { stdout } = await execAsync(`reg query "HKCU\\Environment" /v "${key}"`);
-      const match = stdout.match(/REG_\w+\s+(.+)/);
-      return match ? match[1].trim() : void 0;
+      return this.load().env?.ANTHROPIC_MODEL;
     } catch {
       return void 0;
     }
   }
+  applyModel(env, model) {
+    env.ANTHROPIC_MODEL = model;
+    for (const tier of MODEL_TIERS) {
+      env[`ANTHROPIC_DEFAULT_${tier}_MODEL`] = model;
+      env[`ANTHROPIC_DEFAULT_${tier}_MODEL_NAME`] = model;
+    }
+  }
 }
-function registerIpcHandlers(store2, monitor2, alertEngine2, getMainWindow) {
-  const envSwitcher = new EnvSwitcher();
+function registerIpcHandlers(store2, monitor2, alertEngine2, getMainWindow, getAllWindows) {
+  const claudeSettings = new ClaudeSettings();
+  function broadcast(channel, payload) {
+    for (const win of getAllWindows()) {
+      win.webContents.send(channel, payload);
+    }
+  }
   electron.ipcMain.handle("account:list", () => {
     return store2.listAccounts().map((a) => ({ ...a, accessKey: mask(a.accessKey), secretKey: "***" }));
   });
@@ -771,37 +801,43 @@ function registerIpcHandlers(store2, monitor2, alertEngine2, getMainWindow) {
   });
   electron.ipcMain.handle("usage:list", () => monitor2.getSnapshots());
   electron.ipcMain.handle("usage:refresh", async () => {
+    return await monitor2.tick();
+  });
+  monitor2.setOnRefresh((snaps) => {
     try {
-      const snaps = await monitor2.refreshAll();
-      console.log("[ipc] refreshAll returned", snaps.length, "snapshots");
-      for (const s of snaps) {
-        if (s.error) console.log("[ipc] seat", s.seatId, "error:", s.error);
+      const decision = alertEngine2.evaluate(snaps, store2.getSeats());
+      broadcast("status:update", decision.status);
+      if (decision.needAutoSwitch && decision.switchFromSeatId) {
+        const next = alertEngine2.pickNextSeat(snaps, store2.getSeats(), decision.switchFromSeatId);
+        if (next) switchToSeat(next);
       }
-      let status = "idle";
-      try {
-        const decision = alertEngine2.evaluate(snaps, store2.getSeats());
-        status = decision.status;
-        if (decision.needAutoSwitch && decision.switchFromSeatId) {
-          const next = alertEngine2.pickNextSeat(snaps, store2.getSeats(), decision.switchFromSeatId);
-          if (next) await switchToSeat(next);
-        }
-      } catch (e) {
-        console.error("[ipc] alertEngine error:", e.message);
-      }
-      getMainWindow()?.webContents.send("status:update", status);
-      return snaps;
     } catch (e) {
-      console.error("[ipc] usage:refresh failed:", e);
-      throw e;
+      console.error("[monitor] alertEngine error:", e.message);
     }
+    broadcast("usage:update", snaps);
   });
   electron.ipcMain.handle("env:switch", async (_e, seatId) => {
     const seat = store2.getSeats().find((s) => s.seatId === seatId);
     if (!seat) throw new Error("席位不存在");
     await switchToSeat(seat);
+    await monitor2.tick();
     return true;
   });
-  electron.ipcMain.handle("env:get", (_e, key) => envSwitcher.getEnv(key));
+  electron.ipcMain.handle("model:list", async () => {
+    const accounts = store2.listAccounts();
+    if (accounts.length === 0) throw new Error("请先添加火山账号");
+    const activeSeat = store2.getSeats().find((s) => s.seatId === store2.getActiveSeatId());
+    const account = accounts.find((a) => a.id === activeSeat?.accountId) ?? accounts[0];
+    const client = new VolcApiClient({ accessKey: account.accessKey, secretKey: account.secretKey });
+    const resp = await client.listModelRateLimit();
+    return resp.Items.map((i) => i.FoundationModelName);
+  });
+  electron.ipcMain.handle("model:switch", (_e, model) => {
+    store2.setSettings({ model });
+    claudeSettings.setModel(model);
+    return true;
+  });
+  electron.ipcMain.handle("model:current", () => claudeSettings.getCurrentModel() ?? "");
   electron.ipcMain.handle("settings:get", () => store2.getSettings());
   electron.ipcMain.handle("settings:set", (_e, settings) => {
     store2.setSettings(settings);
@@ -820,15 +856,11 @@ function registerIpcHandlers(store2, monitor2, alertEngine2, getMainWindow) {
       win.focus();
     }
   });
-  async function switchToSeat(seat) {
-    const baseUrl = seat.scene === "agent_plan" ? "https://ark.cn-beijing.volces.com/api/v3" : "https://ark.cn-beijing.volces.com/api/v3";
-    await envSwitcher.setEnvs({
-      ARK_API_KEY: seat.apiKey,
-      ARK_BASE_URL: baseUrl,
-      ARK_MODEL: "ark-code-latest"
-    });
+  function switchToSeat(seat) {
+    const model = store2.getSettings().model || claudeSettings.getCurrentModel();
+    claudeSettings.switchKey(seat.scene, seat.apiKey, model);
     store2.setActiveSeatId(seat.seatId);
-    getMainWindow()?.webContents.send("active:changed", seat.seatId);
+    broadcast("active:changed", seat.seatId);
   }
 }
 function mask(s) {
@@ -963,7 +995,13 @@ electron.app.whenReady().then(() => {
   createBallWindow();
   createPanelWindow();
   createTray();
-  registerIpcHandlers(store, monitor, alertEngine, () => panelWindow);
+  registerIpcHandlers(
+    store,
+    monitor,
+    alertEngine,
+    () => panelWindow,
+    () => [ballWindow, panelWindow].filter((w) => !!w)
+  );
   monitor.start();
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) {

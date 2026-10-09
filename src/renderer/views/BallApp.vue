@@ -4,10 +4,14 @@ import { useMainStore } from '../stores/main'
 
 const store = useMainStore()
 
-// 三时限用量 (跨所有Key取最大)
+// 三时限用量: 只统计当前激活 Key (切 Key 时随 active:changed 立即切换)
+// 未设置激活 Key 时回退为全量最大值
 const usage = computed(() => {
+  const target = store.activeSeatId
+    ? store.snapshots.filter(s => s.seatId === store.activeSeatId)
+    : store.snapshots
   let five = 0, weekly = 0, monthly = 0
-  for (const snap of store.snapshots) {
+  for (const snap of target) {
     if (snap.error) continue
     if (snap.afpFiveHour?.quota > 0) five = Math.max(five, (snap.afpFiveHour.used / snap.afpFiveHour.quota) * 100)
     if (snap.afpWeekly?.quota > 0) weekly = Math.max(weekly, (snap.afpWeekly.used / snap.afpWeekly.quota) * 100)

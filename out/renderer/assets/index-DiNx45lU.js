@@ -7198,6 +7198,7 @@ const useMainStore = /* @__PURE__ */ defineStore("main", () => {
   async function switchSeat(seatId) {
     await window.volc.switchEnv(seatId);
     activeSeatId.value = seatId;
+    await refreshUsage();
   }
   async function syncSeats(accountId) {
     seats.value = await window.volc.syncSeats(accountId);
@@ -7255,8 +7256,9 @@ const _sfc_main$6 = /* @__PURE__ */ defineComponent({
   setup(__props) {
     const store = useMainStore();
     const usage = computed(() => {
+      const target = store.activeSeatId ? store.snapshots.filter((s) => s.seatId === store.activeSeatId) : store.snapshots;
       let five = 0, weekly = 0, monthly = 0;
-      for (const snap of store.snapshots) {
+      for (const snap of target) {
         if (snap.error) continue;
         if (snap.afpFiveHour?.quota > 0) five = Math.max(five, snap.afpFiveHour.used / snap.afpFiveHour.quota * 100);
         if (snap.afpWeekly?.quota > 0) weekly = Math.max(weekly, snap.afpWeekly.used / snap.afpWeekly.quota * 100);
@@ -7442,7 +7444,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const BallApp = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-9a7c25a7"]]);
+const BallApp = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-f9bb91fe"]]);
 const _hoisted_1$4 = { class: "usage-bar" };
 const _hoisted_2$3 = { class: "row" };
 const _hoisted_3$3 = { class: "label" };
@@ -7502,26 +7504,16 @@ const _hoisted_9$2 = {
   key: 1,
   class: "usage"
 };
-const _hoisted_10$2 = { class: "token-row" };
-const _hoisted_11$2 = { class: "token-val" };
-const _hoisted_12$2 = { class: "token-row" };
-const _hoisted_13$1 = { class: "token-val" };
-const _hoisted_14$1 = { class: "token-row" };
-const _hoisted_15$1 = { class: "token-val" };
-const _hoisted_16$1 = {
+const _hoisted_10$2 = {
   key: 2,
-  class: "usage"
-};
-const _hoisted_17$1 = {
-  key: 3,
   class: "info"
 };
-const _hoisted_18$1 = {
-  key: 4,
+const _hoisted_11$2 = {
+  key: 3,
   class: "no-data"
 };
-const _hoisted_19$1 = { class: "actions" };
-const _hoisted_20$1 = ["disabled"];
+const _hoisted_12$2 = { class: "actions" };
+const _hoisted_13$1 = ["disabled"];
 const _sfc_main$4 = /* @__PURE__ */ defineComponent({
   __name: "KeyCard",
   props: {
@@ -7558,11 +7550,6 @@ const _sfc_main$4 = /* @__PURE__ */ defineComponent({
       if (s.afpMonthly && s.afpMonthly.quota > 0) return s.afpMonthly.used / s.afpMonthly.quota * 100;
       return s.monthlyUsage;
     });
-    function fmtTokens(n) {
-      if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-      if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
-      return String(n);
-    }
     const statusColor = computed(() => {
       const p2 = fiveHourPct.value;
       if (p2 === void 0) return "var(--color-idle)";
@@ -7612,20 +7599,7 @@ const _sfc_main$4 = /* @__PURE__ */ defineComponent({
             class: normalizeClass(["expire", { warn: expireDays.value <= 3 && !expired.value }])
           }, toDisplayString(expired.value ? "已过期" : `剩 ${expireDays.value} 天`), 3)
         ]),
-        __props.snapshot?.error ? (openBlock(), createElementBlock("div", _hoisted_8$2, "⚠ " + toDisplayString(__props.snapshot.error), 1)) : __props.snapshot && __props.snapshot.codingTokensUsed ? (openBlock(), createElementBlock("div", _hoisted_9$2, [
-          createBaseVNode("div", _hoisted_10$2, [
-            _cache[1] || (_cache[1] = createBaseVNode("span", { class: "token-label" }, "5小时", -1)),
-            createBaseVNode("span", _hoisted_11$2, toDisplayString(fmtTokens(__props.snapshot.codingTokensUsed.fiveHour)) + " tokens", 1)
-          ]),
-          createBaseVNode("div", _hoisted_12$2, [
-            _cache[2] || (_cache[2] = createBaseVNode("span", { class: "token-label" }, "本周", -1)),
-            createBaseVNode("span", _hoisted_13$1, toDisplayString(fmtTokens(__props.snapshot.codingTokensUsed.weekly)) + " tokens", 1)
-          ]),
-          createBaseVNode("div", _hoisted_14$1, [
-            _cache[3] || (_cache[3] = createBaseVNode("span", { class: "token-label" }, "本月", -1)),
-            createBaseVNode("span", _hoisted_15$1, toDisplayString(fmtTokens(__props.snapshot.codingTokensUsed.monthly)) + " tokens", 1)
-          ])
-        ])) : __props.snapshot && (fiveHourPct.value !== void 0 || weeklyPct.value !== void 0 || monthlyPct.value !== void 0) ? (openBlock(), createElementBlock("div", _hoisted_16$1, [
+        __props.snapshot?.error ? (openBlock(), createElementBlock("div", _hoisted_8$2, "⚠ " + toDisplayString(__props.snapshot.error), 1)) : __props.snapshot && (fiveHourPct.value !== void 0 || weeklyPct.value !== void 0 || monthlyPct.value !== void 0) ? (openBlock(), createElementBlock("div", _hoisted_9$2, [
           createVNode(UsageBar, {
             label: "5小时",
             percent: fiveHourPct.value,
@@ -7641,19 +7615,19 @@ const _sfc_main$4 = /* @__PURE__ */ defineComponent({
             percent: monthlyPct.value,
             reset: formatReset(__props.snapshot.monthlyResetTime || __props.snapshot.afpMonthly?.resetTime)
           }, null, 8, ["percent", "reset"])
-        ])) : __props.snapshot?.info ? (openBlock(), createElementBlock("div", _hoisted_17$1, toDisplayString(__props.snapshot.info), 1)) : (openBlock(), createElementBlock("div", _hoisted_18$1, "暂无用量数据，点击刷新")),
-        createBaseVNode("div", _hoisted_19$1, [
+        ])) : __props.snapshot?.info ? (openBlock(), createElementBlock("div", _hoisted_10$2, toDisplayString(__props.snapshot.info), 1)) : (openBlock(), createElementBlock("div", _hoisted_11$2, "暂无用量数据，点击刷新")),
+        createBaseVNode("div", _hoisted_12$2, [
           createBaseVNode("button", {
             class: "switch-btn",
             disabled: __props.active || expired.value,
             onClick: onSwitch
-          }, toDisplayString(__props.active ? "✓ 当前使用" : "切换到此 Key"), 9, _hoisted_20$1)
+          }, toDisplayString(__props.active ? "✓ 当前使用" : "切换到此 Key"), 9, _hoisted_13$1)
         ])
       ], 2);
     };
   }
 });
-const KeyCard = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-d8f0b6a7"]]);
+const KeyCard = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-d3e5b140"]]);
 const _hoisted_1$2 = { class: "settings" };
 const _hoisted_2$1 = { class: "block" };
 const _hoisted_3$1 = { class: "block-header" };
@@ -7682,6 +7656,11 @@ const _hoisted_19 = { class: "setting-row" };
 const _hoisted_20 = { class: "setting-row" };
 const _hoisted_21 = { class: "setting-row" };
 const _hoisted_22 = { class: "setting-row" };
+const _hoisted_23 = { class: "block" };
+const _hoisted_24 = { class: "setting-row" };
+const _hoisted_25 = { class: "model-controls" };
+const _hoisted_26 = ["value"];
+const _hoisted_27 = ["disabled"];
 const _sfc_main$3 = /* @__PURE__ */ defineComponent({
   __name: "Settings",
   setup(__props) {
@@ -7695,6 +7674,29 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
       remark: ""
     });
     const saving = /* @__PURE__ */ ref(false);
+    const models = /* @__PURE__ */ ref([]);
+    const modelsLoading = /* @__PURE__ */ ref(false);
+    async function loadModels() {
+      modelsLoading.value = true;
+      try {
+        models.value = await window.volc.listModels();
+      } catch (e) {
+        alert("模型列表获取失败: " + (e.message || e));
+      } finally {
+        modelsLoading.value = false;
+      }
+    }
+    async function onModelChange() {
+      if (!store.settings.model) return;
+      await window.volc.switchModel(store.settings.model);
+      alert(`已切换模型: ${store.settings.model}（新开 Claude Code 会话生效）`);
+    }
+    onMounted(async () => {
+      if (!store.settings.model) {
+        store.settings.model = await window.volc.getCurrentModel();
+      }
+      await loadModels();
+    });
     async function addAccount() {
       if (!form.name || !form.accessKey || !form.secretKey) return;
       saving.value = true;
@@ -7723,7 +7725,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
       return openBlock(), createElementBlock("div", _hoisted_1$2, [
         createBaseVNode("section", _hoisted_2$1, [
           createBaseVNode("div", _hoisted_3$1, [
-            _cache[11] || (_cache[11] = createBaseVNode("h3", null, "账号管理", -1)),
+            _cache[12] || (_cache[12] = createBaseVNode("h3", null, "账号管理", -1)),
             createBaseVNode("button", {
               class: "add-btn",
               onClick: _cache[0] || (_cache[0] = ($event) => showAddAccount.value = !showAddAccount.value)
@@ -7751,7 +7753,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             ]),
             withDirectives(createBaseVNode("select", {
               "onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => form.edition = $event)
-            }, [..._cache[12] || (_cache[12] = [
+            }, [..._cache[13] || (_cache[13] = [
               createBaseVNode("option", { value: "personal" }, "个人版", -1),
               createBaseVNode("option", { value: "team" }, "企业版", -1)
             ])], 512), [
@@ -7791,9 +7793,9 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
           ])
         ]),
         createBaseVNode("section", _hoisted_15, [
-          _cache[19] || (_cache[19] = createBaseVNode("h3", null, "监控设置", -1)),
+          _cache[20] || (_cache[20] = createBaseVNode("h3", null, "监控设置", -1)),
           createBaseVNode("div", _hoisted_16, [
-            _cache[13] || (_cache[13] = createBaseVNode("label", null, "轮询间隔 (秒)", -1)),
+            _cache[14] || (_cache[14] = createBaseVNode("label", null, "轮询间隔 (秒)", -1)),
             createBaseVNode("input", {
               type: "number",
               value: unref(store).settings.pollInterval / 1e3,
@@ -7801,7 +7803,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             }, null, 40, _hoisted_17)
           ]),
           createBaseVNode("div", _hoisted_18, [
-            _cache[14] || (_cache[14] = createBaseVNode("label", null, "告警阈值 (%)", -1)),
+            _cache[15] || (_cache[15] = createBaseVNode("label", null, "告警阈值 (%)", -1)),
             withDirectives(createBaseVNode("input", {
               type: "number",
               "onUpdate:modelValue": _cache[6] || (_cache[6] = ($event) => unref(store).settings.warnThreshold = $event)
@@ -7815,7 +7817,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             ])
           ]),
           createBaseVNode("div", _hoisted_19, [
-            _cache[15] || (_cache[15] = createBaseVNode("label", null, "危险阈值 (%)", -1)),
+            _cache[16] || (_cache[16] = createBaseVNode("label", null, "危险阈值 (%)", -1)),
             withDirectives(createBaseVNode("input", {
               type: "number",
               "onUpdate:modelValue": _cache[7] || (_cache[7] = ($event) => unref(store).settings.dangerThreshold = $event)
@@ -7829,7 +7831,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             ])
           ]),
           createBaseVNode("div", _hoisted_20, [
-            _cache[16] || (_cache[16] = createBaseVNode("label", null, "自动切换", -1)),
+            _cache[17] || (_cache[17] = createBaseVNode("label", null, "自动切换", -1)),
             withDirectives(createBaseVNode("input", {
               type: "checkbox",
               "onUpdate:modelValue": _cache[8] || (_cache[8] = ($event) => unref(store).settings.autoSwitch = $event)
@@ -7838,7 +7840,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             ])
           ]),
           createBaseVNode("div", _hoisted_21, [
-            _cache[17] || (_cache[17] = createBaseVNode("label", null, "自动切换阈值 (%)", -1)),
+            _cache[18] || (_cache[18] = createBaseVNode("label", null, "自动切换阈值 (%)", -1)),
             withDirectives(createBaseVNode("input", {
               type: "number",
               "onUpdate:modelValue": _cache[9] || (_cache[9] = ($event) => unref(store).settings.autoSwitchThreshold = $event)
@@ -7852,7 +7854,7 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             ])
           ]),
           createBaseVNode("div", _hoisted_22, [
-            _cache[18] || (_cache[18] = createBaseVNode("label", null, "到期提醒 (天)", -1)),
+            _cache[19] || (_cache[19] = createBaseVNode("label", null, "到期提醒 (天)", -1)),
             withDirectives(createBaseVNode("input", {
               type: "number",
               "onUpdate:modelValue": _cache[10] || (_cache[10] = ($event) => unref(store).settings.expireWarnDays = $event)
@@ -7869,12 +7871,43 @@ const _sfc_main$3 = /* @__PURE__ */ defineComponent({
             class: "save-btn",
             onClick: saveSettings
           }, "保存设置")
+        ]),
+        createBaseVNode("section", _hoisted_23, [
+          _cache[23] || (_cache[23] = createBaseVNode("h3", null, "模型设置", -1)),
+          createBaseVNode("div", _hoisted_24, [
+            _cache[22] || (_cache[22] = createBaseVNode("label", null, "模型", -1)),
+            createBaseVNode("div", _hoisted_25, [
+              withDirectives(createBaseVNode("select", {
+                "onUpdate:modelValue": _cache[11] || (_cache[11] = ($event) => unref(store).settings.model = $event),
+                onChange: onModelChange
+              }, [
+                _cache[21] || (_cache[21] = createBaseVNode("option", {
+                  value: "",
+                  disabled: ""
+                }, "选择模型", -1)),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(models.value, (m) => {
+                  return openBlock(), createElementBlock("option", {
+                    key: m,
+                    value: m
+                  }, toDisplayString(m), 9, _hoisted_26);
+                }), 128))
+              ], 544), [
+                [vModelSelect, unref(store).settings.model]
+              ]),
+              createBaseVNode("button", {
+                class: "sync-btn",
+                onClick: loadModels,
+                disabled: modelsLoading.value
+              }, toDisplayString(modelsLoading.value ? "加载中..." : "刷新"), 9, _hoisted_27)
+            ])
+          ]),
+          _cache[24] || (_cache[24] = createBaseVNode("p", { class: "model-hint" }, "切换后写入 ~/.claude/settings.json，新开 Claude Code 会话生效", -1))
         ])
       ]);
     };
   }
 });
-const Settings = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-393d94c6"]]);
+const Settings = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-ae64bb01"]]);
 const _hoisted_1$1 = { class: "panel" };
 const _hoisted_2 = { class: "tabs" };
 const _hoisted_3 = { class: "content" };
@@ -8071,6 +8104,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       window.volc.onStatusUpdate((s) => store.setStatus(s));
       window.volc.onActiveChanged((id) => {
         store.activeSeatId = id;
+      });
+      window.volc.onUsageUpdate((snaps) => {
+        store.snapshots = snaps;
       });
     });
     return (_ctx, _cache) => {

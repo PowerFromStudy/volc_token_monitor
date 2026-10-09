@@ -14,9 +14,12 @@ const api = {
   // 用量
   listUsage: () => electron.ipcRenderer.invoke("usage:list"),
   refreshUsage: () => electron.ipcRenderer.invoke("usage:refresh"),
-  // 环境变量
+  // 切换 Key (写入 ~/.claude/settings.json)
   switchEnv: (seatId) => electron.ipcRenderer.invoke("env:switch", seatId),
-  getEnv: (key) => electron.ipcRenderer.invoke("env:get", key),
+  // 模型
+  listModels: () => electron.ipcRenderer.invoke("model:list"),
+  switchModel: (model) => electron.ipcRenderer.invoke("model:switch", model),
+  getCurrentModel: () => electron.ipcRenderer.invoke("model:current"),
   // 设置
   getSettings: () => electron.ipcRenderer.invoke("settings:get"),
   setSettings: (settings) => electron.ipcRenderer.invoke("settings:set", settings),
@@ -31,6 +34,10 @@ const api = {
   onStatusUpdate: (cb) => {
     electron.ipcRenderer.removeAllListeners("status:update");
     electron.ipcRenderer.on("status:update", (_e, s) => cb(s));
+  },
+  onUsageUpdate: (cb) => {
+    electron.ipcRenderer.removeAllListeners("usage:update");
+    electron.ipcRenderer.on("usage:update", (_e, snaps) => cb(snaps));
   },
   onActiveChanged: (cb) => {
     electron.ipcRenderer.removeAllListeners("active:changed");
